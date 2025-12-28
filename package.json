@@ -1,0 +1,18 @@
+{
+  "name": "@aionbuilders/helios",
+  "module": "src/index.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch tests/server.js"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@killiandvcz/pulse": "^2.1.3"
+  }
+}
