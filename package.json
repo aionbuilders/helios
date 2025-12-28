@@ -10,9 +10,10 @@
     "@types/bun": "latest"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@aionbuilders/helios-protocol": "^1.0.3",
     "@killiandvcz/pulse": "^2.1.3"
   }
 }

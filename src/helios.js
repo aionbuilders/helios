@@ -1,19 +1,41 @@
-import {Pulse} from "@killiandvcz/pulse";
+import { Pulse } from "@killiandvcz/pulse";
 import { HeliosEvent } from "./utils/events.utils";
 import { Connections } from "./connections";
+import { Parser } from "@aionbuilders/helios-protocol";
+import { ProtocolError, MethodManager, EventManager } from "@aionbuilders/helios-protocol";
+
+/**
+ * @typedef {Object} HeliosOptions
+ * @property {number} requestTimeout - Timeout for requests in milliseconds (default: 5000)
+ * @property {'strict'|'permissive'|'passthrough'} parseMode - Mode for parsing incoming messages (default: 'strict')
+ */
 
 /**
 * @typedef {import('bun').WebSocketHandler<any>} WSHandler
 */
 export class Helios {
-    constructor() {
+    /** @param {Partial<HeliosOptions>} options */
+    constructor(options = {}) {
+        /** @type {HeliosOptions} */
+        this.options = {
+            requestTimeout: options.requestTimeout || 5000,
+            parseMode: options.parseMode || 'strict',
+            ...options
+        };
         this.events = new Pulse({
             EventClass: HeliosEvent
         });
-        this.on = this.events.on.bind(this.events);
-        this.off = this.events.off.bind(this.events);
 
         this.connections = new Connections(this);
+        
+        this.methods = new MethodManager();
+        this.method = this.methods.register.bind(this.methods);
+        this.namespace = this.methods.namespace.bind(this.methods);
+        this.use = this.methods.use.bind(this.methods);
+
+        this.topics = new EventManager();
+        this.on = this.topics.on.bind(this.topics);
+        this.off = this.topics.off.bind(this.topics);
     }
     
     /** @type {import('bun').Server<any> | null | undefined} */
@@ -42,10 +64,35 @@ export class Helios {
     /** @param {import('bun').ServerWebSocket} ws */
     handleOpen(ws) {
         this.connections.new(ws);
+        
     }
     
-    /** @param {import('bun').ServerWebSocket} ws @param {string | Buffer<ArrayBuffer>} message  */
-    handleMessage(ws, message) {
+    /** @param {import('bun').ServerWebSocket} ws @param {string | Buffer<ArrayBuffer>} raw  */
+    handleMessage(ws, raw) {
+        const connection = this.connections.get(ws);
+        if (!connection) return; 
+        //TODO: handle unknown connection
+        try {
+            const message = Parser.parse(raw);
+            this.events.emit(message.type, {connection, message, helios: this}).then(e => {
+                if (e.stopped) return;
+                connection.handleMessage(message);
+            });
+        } catch (error) {
+            let message = raw;
+            if (error instanceof ProtocolError) {
+                if (this.options.parseMode === 'strict') throw error;
+                else if (this.options.parseMode === 'permissive') {
+                    let dataType = typeof message === 'string' ? 'text' : 'binary';
+                    if (dataType === 'text') try {
+                        const json = JSON.parse(/** @type {string} */ (message));
+                        dataType = 'json';
+                        message = json;
+                    } catch (e) {}
+                    this.events.emit(dataType, {connection, message, helios: this});
+                }   
+            }
+        }
     }
     
     /** @param {import('bun').ServerWebSocket} ws @param {number} code @param {string} reason */

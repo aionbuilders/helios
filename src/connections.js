@@ -1,5 +1,8 @@
 import { Connection } from './connection.js';
 
+/** 
+ * @extends {Map<import('bun').ServerWebSocket, Connection>}
+ */
 export class Connections extends Map {
     /** @param {import('./helios.js').Helios} helios */
     constructor(helios) {
