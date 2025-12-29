@@ -4,11 +4,21 @@ import { Connections } from "./connections";
 import { Parser } from "@aionbuilders/helios-protocol";
 import { ProtocolError, MethodManager, EventManager } from "@aionbuilders/helios-protocol";
 import { ConnectionClosedError } from "./errors.js";
+import { SessionManager } from "./session/SessionManager.js";
+import { HeliosRequestContext } from "./requests/RequestContext.js";
+
+/**
+ * @typedef {Object} SessionRecoveryOptions
+ * @property {boolean} enabled - Enable session recovery (default: false)
+ * @property {string} secret - Secret key for JWT signing (required if enabled)
+ * @property {number} [ttl=300000] - Session TTL in milliseconds (default: 5 minutes)
+ */
 
 /**
  * @typedef {Object} HeliosOptions
  * @property {number} requestTimeout - Timeout for requests in milliseconds (default: 5000)
  * @property {'strict'|'permissive'|'passthrough'} parseMode - Mode for parsing incoming messages (default: 'strict')
+ * @property {SessionRecoveryOptions} [sessionRecovery] - Session recovery configuration
  */
 
 /**
@@ -28,7 +38,8 @@ export class Helios {
         });
 
         this.connections = new Connections(this);
-        
+
+        /** @type {MethodManager<HeliosRequestContext>} */
         this.methods = new MethodManager();
         this.method = this.methods.register.bind(this.methods);
         this.namespace = this.methods.namespace.bind(this.methods);
@@ -37,6 +48,14 @@ export class Helios {
         this.topics = new EventManager();
         this.on = this.topics.on.bind(this.topics);
         this.off = this.topics.off.bind(this.topics);
+
+        // Initialize session recovery if enabled
+        if (options.sessionRecovery?.enabled) {
+            this.sessionManager = new SessionManager({
+                secret: options.sessionRecovery.secret,
+                ttl: options.sessionRecovery.ttl
+            });
+        }
     }
     
     /** @type {import('bun').Server<any> | null | undefined} */
@@ -61,11 +80,36 @@ export class Helios {
             this.handleDrain(ws);
         })
     }
+
     
     /** @param {import('bun').ServerWebSocket} ws */
     handleOpen(ws) {
-        this.connections.new(ws);
-        
+        // Check for session recovery token
+        if (this.sessionManager) {
+            // Try to extract session token from upgrade request URL
+            // Note: Bun provides the upgrade request in ws.data
+            const url = ws.data?.url;
+            if (url) {
+                try {
+                    const parsedUrl = new URL(url, 'ws://localhost');
+                    const token = parsedUrl.searchParams.get('session_token');
+
+                    if (token) {
+                        // Attempt recovery
+                        this.recoverSession(token, ws);
+                        return;
+                    }
+                } catch (error) {
+                    console.warn('[Helios] Failed to parse URL for session token:', error);
+                }
+            }
+        }
+
+        // Normal new connection
+        const connection = this.connections.new(ws);
+        if (connection) {
+            this.createSession(connection);
+        }
     }
     
     /** @param {import('bun').ServerWebSocket} ws @param {string | Buffer<ArrayBuffer>} raw  */
@@ -118,6 +162,26 @@ export class Helios {
         // Mark connection as closing IMMEDIATELY
         connection.state = 'CLOSING';
 
+        // Session recovery: keep connection in memory instead of cleanup
+        if (this.sessionManager && connection.sessionId) {
+            // Just mark as disconnected, keep in memory for TTL period
+            this.connections.markDisconnected(ws);
+
+            // Mark as closed
+            connection.state = 'CLOSED';
+
+            // Emit disconnection event
+            this.events.emit('disconnection', {
+                connection,
+                code,
+                reason,
+                helios: this
+            });
+
+            return;
+        }
+
+        // No session recovery: cleanup immediately (original behavior)
         // 1. Cancel all pending requests
         if (connection.pendingRequests && connection.pendingRequests.size > 0) {
             for (const [requestId, pendingInfo] of connection.pendingRequests) {
@@ -177,14 +241,88 @@ export class Helios {
         // This is just for additional handling if needed
         // Users can listen to 'drain' event and implement custom queue
     }
-    
+
+    /**
+     * Attempt to recover a session from a JWT token
+     * @param {string} token - JWT session token
+     * @param {import('bun').ServerWebSocket} ws - New WebSocket connection
+     */
+    async recoverSession(token, ws) {
+        try {
+            // 1. Verify JWT
+            const session = await this.sessionManager.verify(token);
+            if (!session) {
+                return this.createNewSession(ws, 'Invalid token');
+            }
+
+            // 2. Find and reconnect existing Connection
+            const connection = this.connections.reconnect(session.sessionId, ws);
+            if (!connection) {
+                return this.createNewSession(ws, 'Session expired');
+            }
+
+            // 3. Emit success events
+            connection.emit('session:recovered', {
+                sessionId: session.sessionId,
+                metadata: session.metadata || {}
+            });
+
+            this.events.emit('session:recovered', {
+                connection,
+                session,
+                helios: this
+            });
+
+        } catch (error) {
+            console.error('[Helios] Session recovery failed:', error);
+            this.createNewSession(ws, error.message);
+        }
+    }
+
+    /**
+     * Create a new session for a connection
+     * @param {import('./connection.js').Connection} connection
+     */
+    async createSession(connection) {
+        if (!this.sessionManager) return;
+
+        try {
+            const token = await this.sessionManager.create(connection);
+
+            // Add to sessionMap now that sessionId is set
+            this.connections.sessionMap.set(connection.sessionId, connection);
+
+            connection.emit('session:created', { token });
+        } catch (error) {
+            console.error('[Helios] Failed to create session:', error);
+        }
+    }
+
+    /**
+     * Create a new connection and session when recovery fails
+     * @param {import('bun').ServerWebSocket} ws
+     * @param {string} reason - Reason why recovery failed
+     */
+    createNewSession(ws, reason) {
+        const connection = this.connections.new(ws);
+        if (connection) {
+            connection.emit('session:recovery-failed', { reason });
+            this.createSession(connection);
+        }
+    }
+
     /** @param {Partial<Parameters<typeof Bun.serve>[0]>} options */
     serve(options) {
         console.log("Starting Helios server with args:", options);
         try {
             this.server = Bun.serve({
                 fetch(req, server) {
-                    server.upgrade(req);
+                    // Pass URL in upgrade data for session recovery
+                    server.upgrade(req, {
+                        data: {
+                            url: req.url
+                        }
+                    });
                 },
                 websocket: this.websocket,
                 ...options,

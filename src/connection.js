@@ -1,12 +1,20 @@
 import { Serializer } from '@aionbuilders/helios-protocol';
 import { Message, Event, Request, Response, EventManager } from '@aionbuilders/helios-protocol';
 import { ConnectionClosedError } from './errors.js';
+import { HeliosRequestContext } from './requests/RequestContext.js';
 
 export class Connection {
     /** @param {import('./helios.js').Helios} helios @param {import('bun').ServerWebSocket} ws */
     constructor(helios, ws) {
         this.helios = helios;
         this.ws = ws;
+
+        // Generate unique connection ID
+        this.id = crypto.randomUUID();
+
+        // Session ID (will be set when session is created)
+        /** @type {string | null} */
+        this.sessionId = null;
 
         this.data = new Map();
 
@@ -123,7 +131,8 @@ export class Connection {
 
     /** @param {Request} request */
     handleRequest(request) {
-        this.helios.methods.handle(request, { connection: this }).then(res => {
+        const ctx = new HeliosRequestContext(request, { connection: this });
+        this.helios.methods.handle(ctx).then(res => {
             this.send(res);
         })
     }
@@ -140,5 +149,22 @@ export class Connection {
     /** @param {Event} event */
     handleEvent(event) {
         this.helios.topics.handle(event, { connection: this });
+    }
+
+    /**
+     * Reconnect this connection to a new WebSocket
+     * Used for session recovery - replaces the WebSocket but keeps all state
+     * @param {import('bun').ServerWebSocket} newWs
+     */
+    reconnect(newWs) {
+        // Just replace the WebSocket
+        this.ws = newWs;
+        this.state = 'OPEN';
+
+        // Everything else stays the same!
+        // - this.data Map
+        // - this.topics EventManager
+        // - this.pendingRequests
+        // - All properties
     }
 }
