@@ -59,6 +59,9 @@ export class Connection {
     /** @param {ArrayBuffer | Uint8Array | Buffer} data @param {Partial<Parameters<typeof Message.outgoing>[1]>} options */
     binary = (data, options = {}) => this.send(Message.outgoing(data, {dataType: "buffer", ...options}));
 
+    /** @param {string} topic @param {any} data @param {Partial<Parameters<typeof Event.outgoing>[1]>} options */
+    emit = (topic, data, options = {}) => this.send(Event.outgoing(data, { topic, ...options }));
+
     /** @param {string} method @param {any} payload @param {Partial<Parameters<typeof Request.outgoing>[1]>} options @returns {Promise<Response>}*/
     request = async (method, payload, options = {}) => {
         // Check connection state
