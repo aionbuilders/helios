@@ -5,7 +5,7 @@
     "": {
       "name": "helios",
       "dependencies": {
-        "@aionbuilders/helios-protocol": "^1.0.3",
+        "@aionbuilders/helios-protocol": "link:@aionbuilders/helios-protocol",
         "@killiandvcz/pulse": "^2.1.3",
       },
       "devDependencies": {
@@ -17,7 +17,7 @@
     },
   },
   "packages": {
-    "@aionbuilders/helios-protocol": ["@aionbuilders/helios-protocol@1.0.3", "", { "peerDependencies": { "typescript": "^5.0.0" } }, "sha512-zUnHOMFqWvn89YjVGk5wHOgP4HNr3gwxZHV5SdNb7votwztH7aTAXUET0JDaKN2unpzi+PoPTsGJ5Ajf0ReZPw=="],
+    "@aionbuilders/helios-protocol": ["@aionbuilders/helios-protocol@link:@aionbuilders/helios-protocol", {}],
 
     "@killiandvcz/pulse": ["@killiandvcz/pulse@2.1.3", "", {}, "sha512-EGmQNLA2KbLOFz6kdUGgh8/kW6wHbAKaSzQSA+MM6VzwGlTU5LmDsmqbdjGDcxPzVufHbi1IzvPM9UPQQiMZVw=="],
 

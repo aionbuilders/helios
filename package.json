@@ -6,6 +6,15 @@
   "scripts": {
     "dev": "bun run --watch tests/server.js"
   },
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "require": "./src/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
@@ -13,7 +22,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@aionbuilders/helios-protocol": "^1.0.3",
+    "@aionbuilders/helios-protocol": "link:@aionbuilders/helios-protocol",
     "@killiandvcz/pulse": "^2.1.3"
   }
 }
