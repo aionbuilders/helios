@@ -19,6 +19,13 @@ export class Connection {
         // Track last token refresh for rate limiting
         this.lastTokenRefresh = Date.now();
 
+        // Health check state
+        this.missedPongs = 0;
+        this.lastPingAt = null;
+        this.lastPongAt = Date.now();
+        this.pingIntervalId = null;
+        this.pingTimeoutId = null;
+
         this.data = new Map();
 
         this.topics = new EventManager();
@@ -160,9 +167,20 @@ export class Connection {
      * @param {import('bun').ServerWebSocket} newWs
      */
     reconnect(newWs) {
-        // Just replace the WebSocket
+        // Stop health check timers for old WebSocket
+        this.stopHealthCheck();
+
+        // Replace the WebSocket
         this.ws = newWs;
         this.state = 'OPEN';
+
+        // Reset health check state
+        this.missedPongs = 0;
+        this.lastPongAt = Date.now();
+        this.lastPingAt = null;
+
+        // Restart health check with new WebSocket
+        this.startHealthCheck();
 
         // Everything else stays the same!
         // - this.data Map
@@ -195,5 +213,103 @@ export class Connection {
         const timeSinceLastRefresh = Date.now() - this.lastTokenRefresh;
         const minRefreshInterval = this.helios.sessionManager.ttl / 2;
         return Math.max(0, minRefreshInterval - timeSinceLastRefresh);
+    }
+
+    /**
+     * Start health check ping interval for this connection
+     */
+    startHealthCheck() {
+        if (!this.helios.options.healthCheck?.enabled) return;
+
+        // Clear any existing timers
+        this.stopHealthCheck();
+
+        const interval = this.helios.options.healthCheck.interval || 30000;
+
+        this.pingIntervalId = setInterval(() => {
+            this.sendPing();
+        }, interval);
+    }
+
+    /**
+     * Stop health check timers for this connection
+     */
+    stopHealthCheck() {
+        if (this.pingIntervalId) {
+            clearInterval(this.pingIntervalId);
+            this.pingIntervalId = null;
+        }
+
+        if (this.pingTimeoutId) {
+            clearTimeout(this.pingTimeoutId);
+            this.pingTimeoutId = null;
+        }
+    }
+
+    /**
+     * Send a ping frame and schedule timeout check
+     */
+    sendPing() {
+        // Skip if connection is not OPEN
+        if (this.state !== 'OPEN') {
+            this.stopHealthCheck();
+            return;
+        }
+
+        const timeout = this.helios.options.healthCheck?.timeout || 10000;
+        const maxMissed = this.helios.options.healthCheck?.maxMissed || 2;
+
+        // Check if we've exceeded max missed pongs
+        if (this.missedPongs >= maxMissed) {
+            this.helios.events.emit('ping-timeout', {
+                connection: this,
+                missedPongs: this.missedPongs,
+                helios: this.helios
+            });
+
+            // Close connection
+            this.ws.close(1000, 'Ping timeout');
+            return;
+        }
+
+        // Send ping
+        this.lastPingAt = Date.now();
+        this.ws.ping();
+
+        // Schedule timeout check
+        this.pingTimeoutId = setTimeout(() => {
+            // Check if pong was received after this ping
+            const lastPingTime = this.lastPingAt || 0;
+            if (this.lastPongAt < lastPingTime) {
+                this.missedPongs++;
+
+                this.helios.events.emit('ping-missed', {
+                    connection: this,
+                    missedPongs: this.missedPongs,
+                    helios: this.helios
+                });
+            }
+        }, timeout);
+    }
+
+    /**
+     * Handle pong received
+     */
+    handlePong() {
+        this.lastPongAt = Date.now();
+        this.missedPongs = 0; // Reset missed counter
+
+        // Clear the timeout check
+        if (this.pingTimeoutId) {
+            clearTimeout(this.pingTimeoutId);
+            this.pingTimeoutId = null;
+        }
+
+        const lastPingTime = this.lastPingAt || 0;
+        this.helios.events.emit('pong-received', {
+            connection: this,
+            latency: this.lastPongAt - lastPingTime,
+            helios: this.helios
+        });
     }
 }

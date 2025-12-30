@@ -107,6 +107,9 @@ export class Connections extends Map {
             const now = Date.now();
             for (const [sessionId, {connection, expiresAt}] of this.disconnectedSessions) {
                 if (now >= expiresAt) {
+                    // Stop health check timers before cleanup
+                    connection.stopHealthCheck();
+
                     // Really cleanup now
                     this.sessionMap.delete(sessionId);
                     this.disconnectedSessions.delete(sessionId);

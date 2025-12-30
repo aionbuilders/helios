@@ -15,10 +15,19 @@ import { HeliosRequestContext } from "./requests/RequestContext.js";
  */
 
 /**
+ * @typedef {Object} HealthCheckOptions
+ * @property {boolean} enabled - Enable health checks (default: true)
+ * @property {number} interval - Ping interval in milliseconds (default: 30000)
+ * @property {number} timeout - Time to wait for pong in milliseconds (default: 10000)
+ * @property {number} maxMissed - Close after N missed pongs (default: 2)
+ */
+
+/**
  * @typedef {Object} HeliosOptions
  * @property {number} requestTimeout - Timeout for requests in milliseconds (default: 5000)
  * @property {'strict'|'permissive'|'passthrough'} parseMode - Mode for parsing incoming messages (default: 'strict')
  * @property {SessionRecoveryOptions} [sessionRecovery] - Session recovery configuration
+ * @property {HealthCheckOptions} [healthCheck] - Health check configuration
  */
 
 /**
@@ -31,6 +40,12 @@ export class Helios {
         this.options = {
             requestTimeout: options.requestTimeout || 5000,
             parseMode: options.parseMode || 'strict',
+            healthCheck: {
+                enabled: options.healthCheck?.enabled !== false, // default: true
+                interval: options.healthCheck?.interval || 30000, // 30s
+                timeout: options.healthCheck?.timeout || 10000, // 10s
+                maxMissed: options.healthCheck?.maxMissed || 2
+            },
             ...options
         };
         this.events = new Pulse({
@@ -123,6 +138,14 @@ export class Helios {
         drain: (ws) => this.events.emit("drain", {ws, helios: this}).then(e => {
             if (e.stopped) return;
             this.handleDrain(ws);
+        }),
+        ping: (ws, data) => this.events.emit("ping", {ws, data, helios: this}).then(e => {
+            if (e.stopped) return;
+            this.handlePing(ws, data);
+        }),
+        pong: (ws, data) => this.events.emit("pong", {ws, data, helios: this}).then(e => {
+            if (e.stopped) return;
+            this.handlePong(ws, data);
         })
     }
 
@@ -154,6 +177,9 @@ export class Helios {
         const connection = this.connections.new(ws);
         if (connection) {
             this.createSession(connection);
+
+            // Start health check
+            connection.startHealthCheck();
         }
     }
     
@@ -206,6 +232,9 @@ export class Helios {
 
         // Mark connection as closing IMMEDIATELY
         connection.state = 'CLOSING';
+
+        // Stop health check timers
+        connection.stopHealthCheck();
 
         // Session recovery: keep connection in memory instead of cleanup
         if (this.sessionManager && connection.sessionId) {
@@ -287,6 +316,32 @@ export class Helios {
         // Users can listen to 'drain' event and implement custom queue
     }
 
+    /** @param {import('bun').ServerWebSocket} ws @param {Buffer} data */
+    handlePing(ws, data) {
+        // Server receives ping from client (unusual but possible)
+        // Bun automatically responds with pong, but we can track it
+        const connection = this.connections.get(ws);
+        if (!connection) return;
+
+        this.events.emit('ping-received', {
+            connection,
+            data,
+            helios: this
+        });
+    }
+
+    /** @param {import('bun').ServerWebSocket} ws @param {Buffer} data */
+    handlePong(ws, data) {
+        const connection = this.connections.get(ws);
+
+        if (!connection) {
+            console.warn('[Helios] Pong received for unknown connection');
+            return;
+        }
+
+        connection.handlePong();
+    }
+
     /**
      * Attempt to recover a session from a JWT token
      * @param {string} token - JWT session token
@@ -357,6 +412,50 @@ export class Helios {
             connection.emit('session:recovery-failed', { reason });
             this.createSession(connection);
         }
+    }
+
+    /**
+     * Manually send a ping to a connection
+     * @param {import('./connection.js').Connection} connection
+     * @returns {Promise<number>} Latency in milliseconds
+     */
+    async ping(connection) {
+        if (connection.state !== 'OPEN') {
+            throw new Error('Connection is not open');
+        }
+
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+            /** @type {NodeJS.Timeout | undefined} */
+            let timeoutId;
+
+            // Listen for next pong
+            /** @param {any} event */
+            const handler = ({event}) => {
+                const eventData = event?.data || event;
+                if (eventData?.connection?.id === connection.id) {
+                    cleanup();
+                    resolve(Date.now() - startTime);
+                }
+            };
+
+            // Cleanup function
+            const cleanup = () => {
+                this.events.off('pong-received');
+                if (timeoutId) clearTimeout(timeoutId);
+            };
+
+            this.events.once('pong-received', handler);
+
+            // Timeout after 10 seconds
+            timeoutId = setTimeout(() => {
+                cleanup();
+                reject(new Error('Ping timeout'));
+            }, 10000);
+
+            // Send ping
+            connection.ws.ping();
+        });
     }
 
     /** @param {Partial<Parameters<typeof Bun.serve>[0]>} options */
