@@ -6,6 +6,7 @@ import { ProtocolError, MethodManager, EventManager } from "@aionbuilders/helios
 import { ConnectionClosedError } from "./errors.js";
 import { SessionManager } from "./session/SessionManager.js";
 import { HeliosRequestContext } from "./requests/RequestContext.js";
+import { RoomManager } from "./rooms/RoomManager.js";
 
 /**
  * @typedef {Object} SessionRecoveryOptions
@@ -63,6 +64,28 @@ export class Helios {
         this.topics = new EventManager();
         this.on = this.topics.on.bind(this.topics);
         this.off = this.topics.off.bind(this.topics);
+
+        // Initialize RoomManager
+        this.rooms = new RoomManager(this);
+        this.room = this.rooms.declare.bind(this.rooms);
+        this.broadcast = this.rooms.broadcast.bind(this.rooms);
+
+        // Register built-in RPC methods for rooms
+        this.method('helios.subscribe', async (context) => {
+            const { connection, payload } = context;
+            const { topic, data } = payload;
+
+            const result = await this.rooms.subscribe(connection, topic, data);
+            return result;
+        });
+
+        this.method('helios.unsubscribe', async (context) => {
+            const { connection, payload } = context;
+            const { topic } = payload;
+
+            const result = await this.rooms.unsubscribe(connection, topic);
+            return result;
+        });
 
         // Initialize session recovery if enabled
         if (options.sessionRecovery?.enabled) {
@@ -287,13 +310,16 @@ export class Helios {
             connection.data.clear();
         }
 
-        // 4. Mark as closed
+        // 4. Cleanup room subscriptions
+        this.rooms.cleanup(connection);
+
+        // 5. Mark as closed
         connection.state = 'CLOSED';
 
-        // 5. Remove from connections Map
+        // 6. Remove from connections Map
         this.connections.delete(ws);
 
-        // 6. Emit disconnection event AFTER cleanup
+        // 7. Emit disconnection event AFTER cleanup
         this.events.emit('disconnection', {
             connection,
             code,

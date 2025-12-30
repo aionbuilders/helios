@@ -110,6 +110,9 @@ export class Connections extends Map {
                     // Stop health check timers before cleanup
                     connection.stopHealthCheck();
 
+                    // Cleanup room subscriptions
+                    this.helios.rooms.cleanup(connection);
+
                     // Really cleanup now
                     this.sessionMap.delete(sessionId);
                     this.disconnectedSessions.delete(sessionId);
