@@ -118,4 +118,140 @@ describe('SessionManager', () => {
         expect(session.exp).toBeDefined();
         expect(session.exp).toBeGreaterThan(session.iat);
     });
+
+    test('should refresh token with same sessionId', async () => {
+        const manager = new SessionManager({ secret });
+        const connection = new MockConnection();
+
+        // Create initial token
+        const token1 = await manager.create(connection);
+        const session1 = await manager.verify(token1);
+
+        // Wait 1 second to ensure different timestamp (JWT uses seconds)
+        await new Promise(resolve => setTimeout(resolve, 1100));
+
+        // Refresh token
+        const token2 = await manager.refresh(connection);
+        const session2 = await manager.verify(token2);
+
+        // SessionId should be the same
+        expect(session2.sessionId).toBe(session1.sessionId);
+        expect(session2.connectionId).toBe(session1.connectionId);
+
+        // But tokens should be different (different timestamps)
+        expect(token2).not.toBe(token1);
+    });
+
+    test('should throw error when refreshing without sessionId', async () => {
+        const manager = new SessionManager({ secret });
+        const connection = new MockConnection();
+
+        await expect(manager.refresh(connection)).rejects.toThrow('Cannot refresh: connection has no sessionId');
+    });
+
+    test('should refresh token with new expiration', async () => {
+        const manager = new SessionManager({ secret, ttl: 60000 });
+        const connection = new MockConnection();
+
+        // Create initial token
+        const token1 = await manager.create(connection);
+        const session1 = await manager.verify(token1);
+
+        // Wait 1 second to ensure different timestamp (JWT uses seconds)
+        await new Promise(resolve => setTimeout(resolve, 1100));
+
+        // Refresh
+        const token2 = await manager.refresh(connection);
+        const session2 = await manager.verify(token2);
+
+        // Expiration should be newer (later timestamp)
+        expect(session2.exp).toBeGreaterThan(session1.exp);
+        expect(session2.iat).toBeGreaterThan(session1.iat);
+    });
+});
+
+// Mock Helios for Connection tests
+class MockHelios {
+    constructor(ttl = 5000) {
+        this.sessionManager = new SessionManager({
+            secret: 'test-secret-key-at-least-32-bytes-long',
+            ttl
+        });
+    }
+}
+
+describe('Connection Token Refresh Rate Limiting', () => {
+    test('canRefreshToken returns false without sessionId', async () => {
+        const { Connection } = await import('../src/connection.js');
+        const helios = new MockHelios();
+        const ws = {}; // Mock WebSocket
+        const connection = new Connection(helios, ws);
+
+        expect(connection.canRefreshToken()).toBe(false);
+    });
+
+    test('canRefreshToken returns false immediately after creation', async () => {
+        const { Connection } = await import('../src/connection.js');
+        const helios = new MockHelios(10000); // 10s TTL
+        const ws = {};
+        const connection = new Connection(helios, ws);
+        connection.sessionId = 'sess-test';
+
+        // Should not be able to refresh immediately (< TTL/2)
+        expect(connection.canRefreshToken()).toBe(false);
+    });
+
+    test('canRefreshToken returns true after TTL/2', async () => {
+        const { Connection } = await import('../src/connection.js');
+        const helios = new MockHelios(200); // 200ms TTL
+        const ws = {};
+        const connection = new Connection(helios, ws);
+        connection.sessionId = 'sess-test';
+
+        // Should not be able to refresh immediately
+        expect(connection.canRefreshToken()).toBe(false);
+
+        // Wait for TTL/2 (100ms)
+        await new Promise(resolve => setTimeout(resolve, 110));
+
+        // Now should be able to refresh
+        expect(connection.canRefreshToken()).toBe(true);
+    });
+
+    test('getTimeUntilRefreshAllowed returns correct wait time', async () => {
+        const { Connection } = await import('../src/connection.js');
+        const helios = new MockHelios(1000); // 1s TTL
+        const ws = {};
+        const connection = new Connection(helios, ws);
+        connection.sessionId = 'sess-test';
+
+        // Initially should wait ~500ms
+        const wait1 = connection.getTimeUntilRefreshAllowed();
+        expect(wait1).toBeGreaterThan(400);
+        expect(wait1).toBeLessThanOrEqual(500);
+
+        // After 300ms, should wait ~200ms
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const wait2 = connection.getTimeUntilRefreshAllowed();
+        expect(wait2).toBeGreaterThan(100);
+        expect(wait2).toBeLessThanOrEqual(200);
+
+        // After TTL/2, should be 0
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const wait3 = connection.getTimeUntilRefreshAllowed();
+        expect(wait3).toBe(0);
+    });
+
+    test('lastTokenRefresh updates correctly', async () => {
+        const { Connection } = await import('../src/connection.js');
+        const helios = new MockHelios();
+        const ws = {};
+
+        const before = Date.now();
+        const connection = new Connection(helios, ws);
+        const after = Date.now();
+
+        expect(connection.lastTokenRefresh).toBeGreaterThanOrEqual(before);
+        expect(connection.lastTokenRefresh).toBeLessThanOrEqual(after);
+    });
 });

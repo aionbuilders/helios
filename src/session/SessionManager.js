@@ -62,4 +62,29 @@ export class SessionManager {
             return null;
         }
     }
+
+    /**
+     * Refresh a session token - creates a new token with the same sessionId
+     * @param {import('../connection.js').Connection} connection
+     * @param {Object} [metadata={}] - Optional metadata to include in new token
+     * @returns {Promise<string>} New JWT token
+     */
+    async refresh(connection, metadata = {}) {
+        if (!connection.sessionId) {
+            throw new Error('Cannot refresh: connection has no sessionId');
+        }
+
+        // Create new token with SAME sessionId but new expiration
+        const token = await new jose.SignJWT({
+            sessionId: connection.sessionId,  // Keep the same session ID!
+            connectionId: connection.id,
+            metadata
+        })
+            .setProtectedHeader({ alg: 'HS256' })
+            .setIssuedAt()
+            .setExpirationTime(Math.floor((Date.now() + this.ttl) / 1000))
+            .sign(this.secret);
+
+        return token;
+    }
 }

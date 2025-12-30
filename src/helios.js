@@ -55,6 +55,51 @@ export class Helios {
                 secret: options.sessionRecovery.secret,
                 ttl: options.sessionRecovery.ttl
             });
+
+            // Register session refresh method
+            this.method('session.refresh', async (context) => {
+                const { connection } = context;
+
+                if (!connection.sessionId) {
+                    return { error: 'No active session' };
+                }
+
+                // Rate limiting check
+                if (!connection.canRefreshToken()) {
+                    const waitTime = connection.getTimeUntilRefreshAllowed();
+                    return {
+                        error: 'Rate limit exceeded',
+                        waitMs: waitTime,
+                        message: `Please wait ${Math.ceil(waitTime / 1000)}s before refreshing`
+                    };
+                }
+
+                // Generate new token
+                if (!this.sessionManager) {
+                    return { error: 'Session recovery not enabled' };
+                }
+                const newToken = await this.sessionManager.refresh(connection);
+                connection.lastTokenRefresh = Date.now();
+
+                // Emit event to client
+                connection.emit('session:refreshed', {
+                    token: newToken,
+                    sessionId: connection.sessionId
+                });
+
+                // Emit server event
+                this.events.emit('session:refreshed', {
+                    connection,
+                    token: newToken,
+                    helios: this
+                });
+
+                return {
+                    success: true,
+                    token: newToken,
+                    sessionId: connection.sessionId
+                };
+            });
         }
     }
     
@@ -292,7 +337,10 @@ export class Helios {
             // Add to sessionMap now that sessionId is set
             this.connections.sessionMap.set(connection.sessionId, connection);
 
-            connection.emit('session:created', { token });
+            connection.emit('session:created', {
+                token,
+                ttl: this.sessionManager.ttl
+            });
         } catch (error) {
             console.error('[Helios] Failed to create session:', error);
         }

@@ -16,6 +16,9 @@ export class Connection {
         /** @type {string | null} */
         this.sessionId = null;
 
+        // Track last token refresh for rate limiting
+        this.lastTokenRefresh = Date.now();
+
         this.data = new Map();
 
         this.topics = new EventManager();
@@ -166,5 +169,31 @@ export class Connection {
         // - this.topics EventManager
         // - this.pendingRequests
         // - All properties
+    }
+
+    /**
+     * Check if the connection can refresh its token (rate limiting)
+     * Token refresh is allowed if at least TTL/2 has passed since last refresh
+     * @returns {boolean}
+     */
+    canRefreshToken() {
+        if (!this.sessionId || !this.helios.sessionManager) return false;
+
+        const timeSinceLastRefresh = Date.now() - this.lastTokenRefresh;
+        const minRefreshInterval = this.helios.sessionManager.ttl / 2;
+
+        return timeSinceLastRefresh >= minRefreshInterval;
+    }
+
+    /**
+     * Get time in milliseconds until token refresh is allowed
+     * @returns {number}
+     */
+    getTimeUntilRefreshAllowed() {
+        if (!this.helios.sessionManager) return 0;
+
+        const timeSinceLastRefresh = Date.now() - this.lastTokenRefresh;
+        const minRefreshInterval = this.helios.sessionManager.ttl / 2;
+        return Math.max(0, minRefreshInterval - timeSinceLastRefresh);
     }
 }
