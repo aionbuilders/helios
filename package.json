@@ -4,7 +4,14 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --watch tests/server.js"
+    "dev": "bun run --watch tests/server.js",
+    "build": "bun build src/index.js --outdir dist --target node --minify",
+    "generate-types": "tsc --project ./tsc/tsconfig.json",
+    "prepublishOnly": "bun test && npm run build && npm run generate-types",
+    "release:alpha": "npm version prerelease && npm publish --tag alpha",
+    "release:stable": "npm version major && npm publish",
+    "release:minor": "npm version minor && npm publish --tag latest",
+    "release:patch": "npm version patch && npm publish"
   },
   "exports": {
     ".": {
