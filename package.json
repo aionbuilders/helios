@@ -1,8 +1,10 @@
 {
   "name": "@aionbuilders/helios",
+  "version": "1.0.0",
+  "description": "WebSocket server implementation for Bun - Production-ready real-time messaging with session recovery, health checks, and room management",
   "module": "src/index.js",
+  "main": "src/index.js",
   "type": "module",
-  "private": true,
   "scripts": {
     "dev": "bun run --watch tests/server.js",
     "build": "bun build src/index.js --outdir dist --target node --minify",
@@ -19,6 +21,33 @@
       "require": "./src/index.js"
     }
   },
+  "keywords": [
+    "websocket",
+    "bun",
+    "server",
+    "real-time",
+    "rpc",
+    "pubsub",
+    "session-recovery",
+    "rooms",
+    "broadcast",
+    "helios",
+    "ws",
+    "websockets"
+  ],
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "author": "Killian Di Vincenzo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aionbuilders/helios.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aionbuilders/helios/issues"
+  },
+  "homepage": "https://github.com/aionbuilders/helios#readme",
   "publishConfig": {
     "access": "public"
   },
