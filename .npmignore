@@ -1,0 +1,32 @@
+# Tests
+tests/
+*.test.js
+*.spec.js
+test-imports.js
+
+# Development
+examples/
+.claude/
+CLAUDE.md
+bun.lock
+
+# Config
+.gitignore
+jsconfig.json
+tsconfig.json
+tsc/
+
+# Build artifacts
+*.tsbuildinfo
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc
+.DS_Store
+*.log
+node_modules/
