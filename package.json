@@ -29,7 +29,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@aionbuilders/helios-protocol": "link:@aionbuilders/helios-protocol",
+    "@aionbuilders/helios-protocol": "^1.1.0",
     "@killiandvcz/pulse": "^2.1.3",
     "jose": "^6.1.3"
   }
