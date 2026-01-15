@@ -1,1 +1,1 @@
-export { RoomManager } from './RoomManager.js';
+export * from './RoomManager.js';

@@ -1,6 +1,6 @@
 {
   "name": "@aionbuilders/helios",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "WebSocket server implementation for Bun - Production-ready real-time messaging with session recovery, health checks, and room management",
   "types": "dist/index.d.ts",
   "main": "dist/index.js",
@@ -60,13 +60,13 @@
     "access": "public"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "1.3.6"
   },
   "peerDependencies": {
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@aionbuilders/helios-protocol": "^1.1.0",
+    "@aionbuilders/helios-protocol": "^1.1.1",
     "@killiandvcz/pulse": "^2.1.3",
     "jose": "^6.1.3"
   }
